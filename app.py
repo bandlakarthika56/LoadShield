@@ -6,222 +6,187 @@ from datetime import datetime
 app = Flask(__name__)
 
 DEFAULT_APPLIANCES = [
-    {"appliance_id": "app_1", "name": "Medical Oxygen Concentrator", "wattage": 600, "is_on": True, "priority": 1},
-    {"appliance_id": "app_2", "name": "Refrigerator", "wattage": 400, "is_on": True, "priority": 2},
-    {"appliance_id": "app_3", "name": "Smart Home Hub & Lights", "wattage": 150, "is_on": True, "priority": 3},
-    {"appliance_id": "app_4", "name": "Air Conditioner", "wattage": 1500, "is_on": True, "priority": 4},
-    {"appliance_id": "app_5", "name": "Electric Water Heater", "wattage": 1200, "is_on": True, "priority": 4}
+    {"id": "1", "name": "Medical Oxygen Concentrator", "watt": 600, "on": True, "prio": 1},
+    {"id": "2", "name": "Refrigerator", "watt": 400, "on": True, "prio": 2},
+    {"id": "3", "name": "Smart Hub & Lights", "watt": 150, "on": True, "prio": 3},
+    {"id": "4", "name": "Air Conditioner", "watt": 1500, "on": True, "prio": 4},
+    {"id": "5", "name": "Water Heater", "watt": 1200, "on": True, "prio": 4}
 ]
-DEFAULT_LOAD_LIMIT = 2000 # Set low by default so multi-shedding is easy to trigger
 
-sim_state = {
-    "appliances": json.loads(json.dumps(DEFAULT_APPLIANCES)),
-    "load_limit_w": DEFAULT_LOAD_LIMIT,
-    "event_log": [],
-    "run_status": "Normal"
-}
+state = {"appliances": json.loads(json.dumps(DEFAULT_APPLIANCES)), "limit": 2000, "logs": [], "status": "Normal"}
 
-def log_event(stage: str, message: str):
-    timestamp = datetime.now().strftime("%H:%M:%S")
-    sim_state["event_log"].insert(0, {"timestamp": timestamp, "stage": stage, "message": message})
+def log(stage, msg):
+    state["logs"].insert(0, {"time": datetime.now().strftime("%H:%M:%S"), "stage": stage, "msg": msg})
 
-def recalculate_load():
-    return sum(app["wattage"] for app in sim_state["appliances"] if app["is_on"])
+def get_total():
+    return sum(a["watt"] for a in state["appliances"] if a["on"])
 
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
-        action = request.form.get("action")
-        if action == "reset":
-            sim_state["appliances"] = json.loads(json.dumps(DEFAULT_APPLIANCES))
-            sim_state["load_limit_w"] = DEFAULT_LOAD_LIMIT
-            sim_state["event_log"] = []
-            sim_state["run_status"] = "Normal"
-            log_event("RESET", "Simulation state returned to defaults.")
-        elif action == "scenario_heavy_overload":
-            sim_state["load_limit_w"] = 1500
-            for app in sim_state["appliances"]:
-                app["is_on"] = True # Turn everything ON to trigger massive overload requiring multiple shutdowns
-            sim_state["run_status"] = "Severe Overload Triggered"
-            log_event("SCENARIO", "Loaded Heavy Overload Scenario (Multiple appliances must be shed).")
-        elif action == "update_limit":
+        act = request.form.get("action")
+        if act == "reset":
+            state["appliances"] = json.loads(json.dumps(DEFAULT_APPLIANCES))
+            state["limit"] = 2000
+            state["logs"] = []
+            state["status"] = "Normal"
+            log("RESET", "Reset to default settings.")
+        elif act == "overload":
+            state["limit"] = 1500
+            for a in state["appliances"]:
+                a["on"] = True
+            state["status"] = "Severe Overload Triggered"
+            log("SCENARIO", "All devices turned ON to test multi-appliance shedding.")
+        elif act == "limit":
             try:
-                new_limit = int(request.form.get("load_limit", 2000))
-                sim_state["load_limit_w"] = new_limit
-                log_event("CONFIG", f"Load limit threshold updated to {new_limit}W.")
+                state["limit"] = int(request.form.get("val", 2000))
+                log("CONFIG", f"Load limit updated to {state['limit']}W.")
             except ValueError:
                 pass
-        elif action == "add_appliance":
+        elif act == "add":
             name = request.form.get("name", "").strip()
             try:
-                wattage = int(request.form.get("wattage", 100))
-                priority = int(request.form.get("priority", 3))
+                watt = int(request.form.get("watt", 100))
+                prio = int(request.form.get("prio", 3))
                 if name:
-                    new_id = f"app_{len(sim_state['appliances']) + 1}"
-                    sim_state["appliances"].append({
-                        "appliance_id": new_id,
-                        "name": name,
-                        "wattage": wattage,
-                        "is_on": True,
-                        "priority": priority
-                    })
-                    log_event("CONFIG", f"Added custom appliance: '{name}' ({wattage}W, Priority {priority}).")
+                    state["appliances"].append({"id": str(len(state["appliances"])+1), "name": name, "watt": watt, "on": True, "prio": prio})
+                    log("CONFIG", f"Added '{name}' ({watt}W, Priority {prio}).")
             except ValueError:
                 pass
-        elif action == "run_agent":
-            run_autonomous_agent_loop()
-        elif action == "toggle":
-            app_id = request.form.get("app_id")
-            for app in sim_state["appliances"]:
-                if app["appliance_id"] == app_id:
-                    app["is_on"] = not app["is_on"]
-                    log_event("USER", f"Toggled '{app['name']}' manually.")
-        elif action == "delete":
-            app_id = request.form.get("app_id")
-            sim_state["appliances"] = [app for app in sim_state["appliances"] if app["appliance_id"] != app_id]
-            log_event("CONFIG", "Removed appliance from network.")
+        elif act == "toggle":
+            aid = request.form.get("aid")
+            for a in state["appliances"]:
+                if a["id"] == aid:
+                    a["on"] = not a["on"]
+                    log("USER", f"Toggled {a['name']}")
+        elif act == "delete":
+            aid = request.form.get("aid")
+            state["appliances"] = [a for a in state["appliances"] if a["id"] != aid]
+            log("CONFIG", "Deleted appliance.")
+        elif act == "run":
+            log("START", "Autonomous Multi-Shedding Agent Loop Started.")
+            count = 0
+            while get_total() > state["limit"] and count < 5:
+                sheddable = [a for a in state["appliances"] if a["on"] and a["prio"] > 1]
+                if not sheddable:
+                    state["status"] = "Guardrail Locked"
+                    log("VALIDATE", "Blocked: Only Priority 1 Critical loads remain active!")
+                    break
+                target = max(sheddable, key=lambda x: (x["prio"], x["watt"]))
+                log("PLAN", f"Selected lowest-priority heavy load: {target['name']} ({target['watt']}W, P{target['prio']})")
+                if target["prio"] == 1:
+                    log("VALIDATE", "Safety Guardrail blocked P1 shutdown.")
+                    break
+                target["on"] = False
+                count += 1
+                log("ACT", f"Shedded appliance: {target['name']}")
+                log("VERIFY", f"Current Load: {get_total()}W")
             
-    total_load = recalculate_load()
-    is_overloaded = total_load > sim_state["load_limit_w"]
+            if get_total() <= state["limit"]:
+                state["status"] = "Resolved (Multi-Shed)"
+                log("SUCCESS", f"Overload resolved after shedding {count} appliance(s).")
+            else:
+                state["status"] = "Critical Limit Reached"
+
+    total = get_total()
+    is_over = total > state["limit"]
     
-    HTML_TEMPLATE = """
+    html = """
     <!DOCTYPE html>
     <html>
     <head>
-        <title>LoadShield: Autonomous Multi-Shedding Agent</title>
+        <title>LoadShield Agent</title>
         <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }
-            .container { max-width: 1050px; margin: auto; background: #1e293b; padding: 30px; border-radius: 12px; box-shadow: 0 4px 25px rgba(0,0,0,0.6); }
+            body { font-family: sans-serif; background: #0f172a; color: #f8fafc; padding: 20px; }
+            .box { max-width: 900px; margin: auto; background: #1e293b; padding: 25px; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
             h1 { color: #38bdf8; text-align: center; margin-bottom: 5px; }
-            .subtitle { text-align: center; color: #94a3b8; margin-top: 0; margin-bottom: 25px; }
-            .metrics { display: flex; justify-content: space-around; background: #0f172a; padding: 15px; border-radius: 8px; margin-bottom: 20px; text-align: center; flex-wrap: wrap; gap: 10px; }
-            .metric-box h3 { margin: 0; font-size: 24px; color: #38bdf8; }
-            .metric-box p { margin: 5px 0 0; color: #94a3b8; font-size: 14px; }
-            .panel { background: #0f172a; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #334155; }
-            .panel h3 { margin-top: 0; color: #38bdf8; font-size: 16px; }
-            table { width: 100%; border-collapse: collapse; margin-bottom: 20px; background: #0f172a; border-radius: 8px; overflow: hidden; }
-            th, td { padding: 12px 16px; border-bottom: 1px solid #334155; text-align: left; }
-            th { background: #111827; color: #38bdf8; font-weight: 600; }
-            .badge-on { background: #22c55e; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
-            .badge-off { background: #ef4444; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
-            .p1 { color: #f43f5e; font-weight: bold; }
-            .p2 { color: #fb923c; font-weight: bold; }
-            .p3 { color: #38bdf8; font-weight: bold; }
-            .p4 { color: #94a3b8; font-weight: bold; }
-            .btn { background: #3b82f6; color: white; border: none; padding: 10px 18px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold; }
-            .btn:hover { background: #2563eb; }
-            .btn-scenario { background: #d97706; font-size: 13px; padding: 8px 12px; }
+            .sub { text-align: center; color: #94a3b8; margin-bottom: 20px; font-size: 14px; }
+            .metrics { display: flex; justify-content: space-around; background: #0f172a; padding: 15px; border-radius: 6px; margin-bottom: 20px; text-align: center; }
+            table { width: 100%; border-collapse: collapse; background: #0f172a; border-radius: 6px; overflow: hidden; margin-bottom: 20px; }
+            th, td { padding: 10px 14px; border-bottom: 1px solid #334155; text-align: left; }
+            th { background: #111827; color: #38bdf8; }
+            .btn { background: #3b82f6; color: white; border: none; padding: 10px 18px; border-radius: 5px; cursor: pointer; font-weight: bold; }
             .btn-reset { background: #64748b; }
-            .btn-danger { background: #ef4444; padding: 6px 10px; font-size: 12px; }
-            .logs { background: #0f172a; padding: 15px; border-radius: 8px; max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 13px; border: 1px solid #334155; }
-            .log-item { margin-bottom: 8px; border-bottom: 1px dashed #334155; padding-bottom: 6px; }
-            .form-grid { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 10px; align-items: center; }
-            input[type="text"], input[type="number"], select { padding: 8px 12px; background: #1e293b; border: 1px solid #475569; color: white; border-radius: 4px; width: 100%; box-sizing: border-box; }
-            label { font-size: 14px; color: #cbd5e1; }
-            .actions-bar { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+            .btn-danger { background: #ef4444; padding: 5px 10px; font-size: 12px; }
+            .btn-scen { background: #d97706; }
+            .logs { background: #0f172a; padding: 12px; border-radius: 6px; max-height: 180px; overflow-y: auto; font-family: monospace; font-size: 12px; }
+            input, select { padding: 6px 10px; background: #0f172a; border: 1px solid #475569; color: white; border-radius: 4px; }
+            .panel { background: #0f172a; padding: 15px; border-radius: 6px; margin-bottom: 20px; }
         </style>
     </head>
     <body>
-        <div class="container">
-            <h1>🛡️ LoadShield Autonomous Multi-Shedding Agent</h1>
-            <div class="subtitle">Agentic AI Load Management & MPMC Deterministic Safety Validator</div>
+        <div class="box">
+            <h1>🛡️ LoadShield AI</h1>
+            <div class="sub">Autonomous Multi-Appliance Shedding & MPMC Safety Validator</div>
             
             <div class="metrics">
-                <div class="metric-box">
-                    <h3>{{ total_load }} W</h3>
-                    <p>Active Load</p>
-                </div>
-                <div class="metric-box">
-                    <h3>{{ load_limit }} W</h3>
-                    <p>Load Limit Threshold</p>
-                </div>
-                <div class="metric-box">
-                    <h3 style="color: {% if is_overloaded %}#ef4444{% else %}#22c55e{% endif %};">
-                        {% if is_overloaded %}OVERLOADED{% else %}NORMAL{% endif %}
-                    </h3>
-                    <p>System State</p>
-                </div>
-                <div class="metric-box">
-                    <h3 style="font-size: 14px; margin-top: 4px; color: #fbbf24;">{{ status }}</h3>
-                    <p>Agent Status</p>
-                </div>
+                <div><h3>{{ total }} W</h3><p>Active Load</p></div>
+                <div><h3>{{ limit }} W</h3><p>Load Limit</p></div>
+                <div><h3 style="color: {{ '#ef4444' if is_over else '#22c55e' }};">{{ 'OVERLOAD' if is_over else 'NORMAL' }}</h3><p>State</p></div>
+                <div><h3 style="color: #fbbf24; font-size: 15px; margin-top: 4px;">{{ status }}</h3><p>Agent Status</p></div>
             </div>
 
-            <div class="actions-bar">
-                <form method="POST"><input type="hidden" name="action" value="run_agent"><button type="submit" class="btn">🚀 Run Autonomous Multi-Shedding Loop</button></form>
-                <form method="POST"><input type="hidden" name="action" value="reset"><button type="submit" class="btn btn-reset">🔄 Reset All</button></form>
+            <div style="display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap;">
+                <form method="POST"><input type="hidden" name="action" value="run"><button type="submit" class="btn">🚀 Run Multi-Shedding Agent</button></form>
+                <form method="POST"><input type="hidden" name="action" value="overload"><button type="submit" class="btn btn-scen">⚡ Trigger Heavy Overload</button></form>
+                <form method="POST"><input type="hidden" name="action" value="reset"><button type="submit" class="btn btn-reset">🔄 Reset</button></form>
             </div>
 
-            <!-- Scenario Test Panel -->
             <div class="panel">
-                <h3>🧪 Quick Overload Test Scenario</h3>
-                <form method="POST"><input type="hidden" name="action" value="scenario_heavy_overload"><button type="submit" class="btn btn-scenario">Trigger Heavy Overload (Turns ON All Devices to Test Multi-Appliance Shedding)</button></form>
-            </div>
-
-            <!-- Configuration Panel -->
-            <div class="panel">
-                <h3>⚙️ Live Threshold & Custom Appliance Settings</h3>
-                <form method="POST" style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center;">
-                    <input type="hidden" name="action" value="update_limit">
-                    <label style="font-weight: bold;">Change Limit (W):</label>
-                    <input type="number" name="load_limit" value="{{ load_limit }}" style="max-width: 150px;" required>
-                    <button type="submit" class="btn" style="padding: 8px 15px; font-size: 13px;">Update</button>
+                <form method="POST" style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+                    <input type="hidden" name="action" value="limit">
+                    <label>Set Limit (W):</label>
+                    <input type="number" name="val" value="{{ limit }}" style="width: 100px;" required>
+                    <button type="submit" class="btn" style="padding: 6px 12px; font-size: 13px;">Update</button>
                 </form>
-
-                <form method="POST" class="form-grid">
-                    <input type="hidden" name="action" value="add_appliance">
-                    <input type="text" name="name" placeholder="Appliance Name (e.g. EV Charger)" required>
-                    <input type="number" name="wattage" placeholder="Wattage (W)" required>
-                    <select name="priority">
-                        <option value="1">Priority 1 (Critical)</option>
-                        <option value="2">Priority 2 (Essential)</option>
-                        <option value="3">Priority 3 (Standard)</option>
-                        <option value="4" selected>Priority 4 (Comfort)</option>
+                <form method="POST" style="display: flex; gap: 10px; align-items: center;">
+                    <input type="hidden" name="action" value="add">
+                    <input type="text" name="name" placeholder="Appliance Name" required style="flex:2;">
+                    <input type="number" name="watt" placeholder="Wattage" required style="flex:1;">
+                    <select name="prio" style="flex:1;">
+                        <option value="1">P1 (Critical)</option>
+                        <option value="2">P2 (Essential)</option>
+                        <option value="3">P3 (Standard)</option>
+                        <option value="4" selected>P4 (Comfort)</option>
                     </select>
-                    <button type="submit" class="btn" style="padding: 8px 15px; font-size: 13px;">+ Add Device</button>
+                    <button type="submit" class="btn" style="padding: 6px 12px; font-size: 13px;">+ Add</button>
                 </form>
             </div>
 
-            <h3>Connected Appliance Network & Priority Table</h3>
+            <h3>Connected Appliances</h3>
             <table>
+                <tr><th>Name</th><th>Wattage</th><th>Priority</th><th>Status</th><th>Toggle</th><th>Action</th></tr>
+                {% for a in apps %}
                 <tr>
-                    <th>Appliance Name</th>
-                    <th>Wattage</th>
-                    <th>Priority Tier</th>
-                    <th>Status</th>
-                    <th>Manual Control</th>
-                    <th>Action</th>
-                </tr>
-                {% for app in appliances %}
-                <tr>
-                    <td><strong>{{ app.name }}</strong></td>
-                    <td>{{ app.wattage }} W</td>
+                    <td><strong>{{ a.name }}</strong></td>
+                    <td>{{ a.watt }} W</td>
+                    <td>Priority {{ a.prio }}</td>
+                    <td>{{ '🟢 ON' if a.on else '🔴 OFF' }}</td>
                     <td>
-                        {% if app.priority == 1 %}<span class="p1">P1 - Critical</span>
-                        {% elif app.priority == 2 %}<span class="p2">P2 - Essential</span>
-                        {% elif app.priority == 3 %}<span class="p3">P3 - Standard</span>
-                        {% else %}<span class="p4">P4 - Low / Comfort</span>{% endif %}
-                    </td>
-                    <td>{% if app.is_on %}<span class="badge-on">ON</span>{% else %}<span class="badge-off">OFF</span>{% endif %}</td>
-                    <td>
-                        <form method="POST" style="margin:0;">
-                            <input type="hidden" name="action" value="toggle">
-                            <input type="hidden" name="app_id" value="{{ app.appliance_id }}">
-                            <button type="submit" style="background:#334155; border:none; color:white; padding:6px 12px; border-radius:4px; cursor:pointer;">Toggle</button>
-                        </form>
+                        <form method="POST" style="margin:0;"><input type="hidden" name="action" value="toggle"><input type="hidden" name="aid" value="{{ a.id }}"><button type="submit" style="background:#334155;color:white;border:none;padding:5px 10px;cursor:pointer;border-radius:3px;">Toggle</button></form>
                     </td>
                     <td>
-                        <form method="POST" style="margin:0;">
-                            <input type="hidden" name="action" value="delete">
-                            <input type="hidden" name="app_id" value="{{ app.appliance_id }}">
-                            <button type="submit" class="btn btn-danger">Delete</button>
-                        </form>
+                        <form method="POST" style="margin:0;"><input type="hidden" name="action" value="delete"><input type="hidden" name="aid" value="{{ a.id }}"><button type="submit" class="btn btn-danger">Delete</button></form>
                     </td>
                 </tr>
                 {% endfor %}
             </table>
 
-            <h3>Agent Event Log (Observe → Plan → Validate → Act → Verify Loop)</h3>
+            <h3>Agent Event Logs (Observe → Plan → Validate → Act → Verify)</h3>
             <div class="logs">
-                {% if not logs %}
-                <p style="color: #64748b; text-align: center; margin
+                {% if not logs %}<p style="color: #64748b; text-align: center; margin: 10px 0;">No events recorded yet.</p>{% endif %}
+                {% for l in logs %}
+                <div style="margin-bottom: 6px; border-bottom: 1px dashed #334155; padding-bottom: 4px;">
+                    <span style="color: #38bdf8;">[{{ l.time }}]</span> <b style="color: #fbbf24;">[{{ l.stage }}]</b>: {{ l.msg }}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return render_template_string(html, total=total, limit=state["limit"], is_over=is_over, status=state["status"], apps=state["appliances"], logs=state["logs"])
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    
