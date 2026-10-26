@@ -12,7 +12,7 @@ DEFAULT_APPLIANCES = [
     {"appliance_id": "app_4", "name": "Air Conditioner", "wattage": 1500, "is_on": True, "priority": 4},
     {"appliance_id": "app_5", "name": "Electric Water Heater", "wattage": 1200, "is_on": True, "priority": 4}
 ]
-DEFAULT_LOAD_LIMIT = 2500
+DEFAULT_LOAD_LIMIT = 2000 # Set low by default so multi-shedding is easy to trigger
 
 sim_state = {
     "appliances": json.loads(json.dumps(DEFAULT_APPLIANCES)),
@@ -38,29 +38,17 @@ def index():
             sim_state["event_log"] = []
             sim_state["run_status"] = "Normal"
             log_event("RESET", "Simulation state returned to defaults.")
-        elif action == "scenario_normal":
-            sim_state["load_limit_w"] = 3000
+        elif action == "scenario_heavy_overload":
+            sim_state["load_limit_w"] = 1500
             for app in sim_state["appliances"]:
-                app["is_on"] = app["priority"] <= 2 or app["wattage"] <= 200
-            sim_state["run_status"] = "Normal"
-            log_event("SCENARIO", "Loaded Test Case 1: Normal Operation (Under Limit).")
-        elif action == "scenario_overload":
-            sim_state["load_limit_w"] = 2000
-            for app in sim_state["appliances"]:
-                app["is_on"] = True
-            sim_state["run_status"] = "Overload Detected"
-            log_event("SCENARIO", "Loaded Test Case 2: Severe Overload Triggered.")
-        elif action == "scenario_guardrail":
-            sim_state["load_limit_w"] = 500
-            for app in sim_state["appliances"]:
-                app["is_on"] = (app["priority"] == 1)
-            sim_state["run_status"] = "Guardrail Active"
-            log_event("SCENARIO", "Loaded Test Case 3: Safety Guardrail Lockdown Test.")
+                app["is_on"] = True # Turn everything ON to trigger massive overload requiring multiple shutdowns
+            sim_state["run_status"] = "Severe Overload Triggered"
+            log_event("SCENARIO", "Loaded Heavy Overload Scenario (Multiple appliances must be shed).")
         elif action == "update_limit":
             try:
-                new_limit = int(request.form.get("load_limit", 2500))
+                new_limit = int(request.form.get("load_limit", 2000))
                 sim_state["load_limit_w"] = new_limit
-                log_event("CONFIG", f"Household load threshold set to {new_limit}W.")
+                log_event("CONFIG", f"Load limit threshold updated to {new_limit}W.")
             except ValueError:
                 pass
         elif action == "add_appliance":
@@ -81,7 +69,7 @@ def index():
             except ValueError:
                 pass
         elif action == "run_agent":
-            run_agent_logic()
+            run_autonomous_agent_loop()
         elif action == "toggle":
             app_id = request.form.get("app_id")
             for app in sim_state["appliances"]:
@@ -91,7 +79,7 @@ def index():
         elif action == "delete":
             app_id = request.form.get("app_id")
             sim_state["appliances"] = [app for app in sim_state["appliances"] if app["appliance_id"] != app_id]
-            log_event("CONFIG", "Removed appliance from network profile.")
+            log_event("CONFIG", "Removed appliance from network.")
             
     total_load = recalculate_load()
     is_overloaded = total_load > sim_state["load_limit_w"]
@@ -100,7 +88,7 @@ def index():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>LoadShield: Advanced AI Load Manager</title>
+        <title>LoadShield: Autonomous Multi-Shedding Agent</title>
         <style>
             body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }
             .container { max-width: 1050px; margin: auto; background: #1e293b; padding: 30px; border-radius: 12px; box-shadow: 0 4px 25px rgba(0,0,0,0.6); }
@@ -122,7 +110,7 @@ def index():
             .p4 { color: #94a3b8; font-weight: bold; }
             .btn { background: #3b82f6; color: white; border: none; padding: 10px 18px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold; }
             .btn:hover { background: #2563eb; }
-            .btn-scenario { background: #0ea5e9; font-size: 13px; padding: 8px 12px; }
+            .btn-scenario { background: #d97706; font-size: 13px; padding: 8px 12px; }
             .btn-reset { background: #64748b; }
             .btn-danger { background: #ef4444; padding: 6px 10px; font-size: 12px; }
             .logs { background: #0f172a; padding: 15px; border-radius: 8px; max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 13px; border: 1px solid #334155; }
@@ -135,7 +123,7 @@ def index():
     </head>
     <body>
         <div class="container">
-            <h1>🛡️ LoadShield Advanced AI Simulator</h1>
+            <h1>🛡️ LoadShield Autonomous Multi-Shedding Agent</h1>
             <div class="subtitle">Agentic AI Load Management & MPMC Deterministic Safety Validator</div>
             
             <div class="metrics">
@@ -154,29 +142,25 @@ def index():
                     <p>System State</p>
                 </div>
                 <div class="metric-box">
-                    <h3 style="font-size: 15px; margin-top: 4px; color: #fbbf24;">{{ status }}</h3>
+                    <h3 style="font-size: 14px; margin-top: 4px; color: #fbbf24;">{{ status }}</h3>
                     <p>Agent Status</p>
                 </div>
             </div>
 
             <div class="actions-bar">
-                <form method="POST"><input type="hidden" name="action" value="run_agent"><button type="submit" class="btn">🚀 Run AI Agent Loop</button></form>
+                <form method="POST"><input type="hidden" name="action" value="run_agent"><button type="submit" class="btn">🚀 Run Autonomous Multi-Shedding Loop</button></form>
                 <form method="POST"><input type="hidden" name="action" value="reset"><button type="submit" class="btn btn-reset">🔄 Reset All</button></form>
             </div>
 
-            <!-- Test Cases / Scenarios Panel -->
+            <!-- Scenario Test Panel -->
             <div class="panel">
-                <h3>🧪 Quick Test Case Scenarios for Evaluation</h3>
-                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                    <form method="POST"><input type="hidden" name="action" value="scenario_normal"><button type="submit" class="btn btn-scenario">Test Case 1: Normal State</button></form>
-                    <form method="POST"><input type="hidden" name="action" value="scenario_overload"><button type="submit" class="btn btn-scenario" style="background: #d97706;">Test Case 2: Severe Overload</button></form>
-                    <form method="POST"><input type="hidden" name="action" value="scenario_guardrail"><button type="submit" class="btn btn-scenario" style="background: #e11d48;">Test Case 3: Guardrail Lockdown</button></form>
-                </div>
+                <h3>🧪 Quick Overload Test Scenario</h3>
+                <form method="POST"><input type="hidden" name="action" value="scenario_heavy_overload"><button type="submit" class="btn btn-scenario">Trigger Heavy Overload (Turns ON All Devices to Test Multi-Appliance Shedding)</button></form>
             </div>
 
             <!-- Configuration Panel -->
             <div class="panel">
-                <h3>⚙️ Live Limit & Custom Appliance Configuration</h3>
+                <h3>⚙️ Live Threshold & Custom Appliance Settings</h3>
                 <form method="POST" style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center;">
                     <input type="hidden" name="action" value="update_limit">
                     <label style="font-weight: bold;">Change Limit (W):</label>
@@ -237,63 +221,7 @@ def index():
                 {% endfor %}
             </table>
 
-            <h3>Agent Event Log (Observe → Plan → Validate → Act → Verify)</h3>
+            <h3>Agent Event Log (Observe → Plan → Validate → Act → Verify Loop)</h3>
             <div class="logs">
                 {% if not logs %}
-                <p style="color: #64748b; text-align: center; margin: 15px 0;">Simulation idle. Run test case scenarios or agent loop.</p>
-                {% endif %}
-                {% for log in logs %}
-                <div class="log-item">
-                    <span style="color: #38bdf8;">[{{ log.timestamp }}]</span> 
-                    <strong style="color: #fbbf24;">[{{ log.stage }}]</strong>: 
-                    {{ log.message }}
-                </div>
-                {% endfor %}
-            </div>
-        </div>
-    </body>
-    </html>
-    """
-    return render_template_string(HTML_TEMPLATE, 
-                                  total_load=total_load, 
-                                  load_limit=sim_state["load_limit_w"], 
-                                  is_overloaded=is_overloaded, 
-                                  status=sim_state["run_status"],
-                                  appliances=sim_state["appliances"],
-                                  logs=sim_state["event_log"])
-
-def run_agent_logic():
-    log_event("START", "Agent loop initiated: Observe -> Plan -> Validate -> Act -> Verify.")
-    total_load = recalculate_load()
-    if total_load <= sim_state["load_limit_w"]:
-        sim_state["run_status"] = "Normal"
-        log_event("VERIFY", "Total load within threshold. No load shedding required.")
-        return
-
-    sheddable = [a for a in sim_state["appliances"] if a["is_on"] and a["priority"] > 1]
-    if not sheddable:
-        sim_state["run_status"] = "Blocked (Critical Lockdown)"
-        log_event("VALIDATE", "Safety Guardrail: Only Priority 1 Critical life-support loads remain active. Shutdown prevented.")
-        return
-
-    target = sorted(sheddable, key=lambda x: (x["priority"], x["wattage"]), reverse=True)[0]
-    log_event("PLAN", f"Agent targeted lowest-priority heavy load: '{target['name']}' (Priority {target['priority']}, {target['wattage']}W).")
-
-    if target["priority"] == 1:
-        sim_state["run_status"] = "Policy Violation Blocked"
-        log_event("VALIDATE (REJECTED)", "Deterministic Validator blocked unauthorized shutdown of Priority 1 critical load.")
-        return
-
-    target["is_on"] = False
-    log_event("ACT", f"Successfully shed '{target['name']}'.")
-
-    new_load = recalculate_load()
-    if new_load <= sim_state["load_limit_w"]:
-        sim_state["run_status"] = "Resolved"
-        log_event("VERIFY", f"Overload resolved successfully! New load: {new_load}W.")
-    else:
-        sim_state["run_status"] = "Partial Reduction"
-        log_event("VERIFY", f"Load reduced to {new_load}W. Further evaluation queued.")
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+                <p style="color: #64748b; text-align: center; margin
